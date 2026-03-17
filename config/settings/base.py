@@ -157,3 +157,10 @@ CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = "UTC"
+
+# ---------------------------------------------------------------------------
+# Kafka / Redpanda
+# ---------------------------------------------------------------------------
+KAFKA_BOOTSTRAP_SERVERS = os.environ.get("KAFKA_BOOTSTRAP_SERVERS", "localhost:19092")
+KAFKA_TOPIC_ORDER_EVENTS = "order.events"
+KAFKA_TOPIC_INVENTORY_EVENTS = "inventory.events"

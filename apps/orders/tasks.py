@@ -7,7 +7,7 @@ import logging
 from celery import shared_task
 from django.db import transaction
 
-from apps.common.outbox import is_already_processed, mark_processed
+from apps.common.outbox import is_already_processed, mark_processed, publish_outbox_event
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +80,20 @@ def reserve_stock(self, order_id: str, event_id: str | None = None) -> dict:
             order.transition_to(OrderStatus.RESERVED)
             order.save(update_fields=["status", "updated_at"])
 
+            # Emit StockReserved outbox event for Kafka streaming
+            for ri in reserved_items:
+                publish_outbox_event(
+                    aggregate_type="inventory",
+                    aggregate_id=order.pk,
+                    event_type="StockReserved",
+                    payload={
+                        "order_id": order_id,
+                        "inventory_id": ri["inventory_id"],
+                        "product_id": ri["product_id"],
+                        "qty": ri["reserved_qty"],
+                    },
+                )
+
             if event_id:
                 mark_processed(event_id, CONSUMER_RESERVE)
 
@@ -133,6 +147,20 @@ def release_stock(self, order_id: str, event_id: str | None = None) -> dict:
                         "product_id": str(line.product_id),
                         "released_qty": to_release,
                     })
+
+            # Emit StockReleased outbox events for Kafka streaming
+            for ri in released_items:
+                publish_outbox_event(
+                    aggregate_type="inventory",
+                    aggregate_id=order.pk,
+                    event_type="StockReleased",
+                    payload={
+                        "order_id": order_id,
+                        "inventory_id": ri["inventory_id"],
+                        "product_id": ri["product_id"],
+                        "qty": ri["released_qty"],
+                    },
+                )
 
             if event_id:
                 mark_processed(event_id, CONSUMER_RELEASE)
