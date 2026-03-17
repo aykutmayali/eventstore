@@ -87,8 +87,7 @@ def reserve_stock(self, order_id: str, event_id: str | None = None) -> dict:
 
     except Exception as exc:
         logger.exception("reserve_stock failed for order %s", order_id)
-        raise self.retry(exc=exc)
-
+        raise self.retry(exc=exc) from exc
 
 @shared_task(bind=True, max_retries=3, default_retry_delay=5)
 def release_stock(self, order_id: str, event_id: str | None = None) -> dict:
@@ -142,8 +141,7 @@ def release_stock(self, order_id: str, event_id: str | None = None) -> dict:
 
     except Exception as exc:
         logger.exception("release_stock failed for order %s", order_id)
-        raise self.retry(exc=exc)
-
+        raise self.retry(exc=exc) from exc
 
 @shared_task(bind=True, max_retries=3, default_retry_delay=5)
 def send_order_email(self, order_id: str, event_type: str, event_id: str | None = None) -> dict:
@@ -176,4 +174,4 @@ def send_order_email(self, order_id: str, event_type: str, event_id: str | None 
 
     except Exception as exc:
         logger.exception("send_order_email failed for order %s", order_id)
-        raise self.retry(exc=exc)
+        raise self.retry(exc=exc) from exc
