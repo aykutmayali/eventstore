@@ -19,6 +19,7 @@ dependencies = [
     "confluent-kafka>=2.3",
     "prometheus-client>=0.20",
     "django-prometheus>=2.3",
+    "gunicorn>=22.0",
 ]
 
 [project.optional-dependencies]
