@@ -17,18 +17,28 @@ CONSUMER_EMAIL = "send_email"
 
 
 @shared_task(bind=True, max_retries=3, default_retry_delay=5)
-def reserve_stock(self, order_id: str, event_id: str | None = None) -> dict:
+def reserve_stock(
+    self,
+    order_id: str,
+    event_id: str | None = None,
+    strategy: str = "fifo",
+    allow_partial: bool = True,
+) -> dict:
     """Reserve inventory for all lines in an order.
 
     Idempotent: if event_id was already processed, skip silently.
     Uses select_for_update to prevent race conditions.
+    Delegates to apps.inventory.allocation for the actual allocation logic.
     """
+    from apps.inventory.allocation import AllocationResult, Strategy, allocate
     from apps.inventory.models import InventoryItem
     from apps.orders.models import Order, OrderStatus
 
     if event_id and is_already_processed(event_id, CONSUMER_RESERVE):
         logger.info("reserve_stock: event %s already processed, skipping", event_id)
         return {"status": "skipped", "reason": "duplicate"}
+
+    alloc_strategy = Strategy(strategy)
 
     try:
         with transaction.atomic():
@@ -42,62 +52,58 @@ def reserve_stock(self, order_id: str, event_id: str | None = None) -> dict:
                 return {"status": "skipped", "reason": f"status={order.status}"}
 
             lines = order.lines.select_related("product").all()
-            reserved_items = []
 
-            for line in lines:
-                # FIFO: oldest inventory first
-                items = (
-                    InventoryItem.objects
-                    .filter(product=line.product)
-                    .select_for_update()
-                    .order_by("created_at")
-                )
+            # Build demand list: [(product_id, qty), ...]
+            demand = [(line.product_id, line.qty) for line in lines]
 
-                remaining_qty = line.qty
-                for item in items:
-                    if remaining_qty <= 0:
-                        break
-                    available = item.on_hand - item.reserved
-                    if available <= 0:
-                        continue
-                    to_reserve = min(remaining_qty, available)
-                    item.reserved += to_reserve
-                    item.save(update_fields=["reserved", "updated_at"])
-                    remaining_qty -= to_reserve
-                    reserved_items.append({
-                        "inventory_id": str(item.pk),
-                        "product_id": str(line.product_id),
-                        "reserved_qty": to_reserve,
-                    })
+            # Use allocation service with select_for_update QuerySet
+            inventory_qs = InventoryItem.objects.select_for_update()
+            result: AllocationResult = allocate(
+                demand=demand,
+                inventory_qs=inventory_qs,
+                strategy=alloc_strategy,
+                allow_partial=allow_partial,
+            )
 
-                if remaining_qty > 0:
+            if result.backorders:
+                for bo in result.backorders:
                     logger.warning(
                         "reserve_stock: insufficient stock for product %s "
-                        "(needed=%d, short=%d)",
-                        line.product_id, line.qty, remaining_qty,
+                        "(short=%d)",
+                        bo.product_id, bo.qty_short,
                     )
 
             order.transition_to(OrderStatus.RESERVED)
             order.save(update_fields=["status", "updated_at"])
 
-            # Emit StockReserved outbox event for Kafka streaming
-            for ri in reserved_items:
+            # Emit StockReserved outbox events for Kafka streaming
+            reserved_items = []
+            for alloc in result.allocations:
+                payload = {
+                    "order_id": order_id,
+                    "inventory_id": str(alloc.inventory_item_id),
+                    "product_id": str(alloc.product_id),
+                    "qty": alloc.qty,
+                }
                 publish_outbox_event(
                     aggregate_type="inventory",
                     aggregate_id=order.pk,
                     event_type="StockReserved",
-                    payload={
-                        "order_id": order_id,
-                        "inventory_id": ri["inventory_id"],
-                        "product_id": ri["product_id"],
-                        "qty": ri["reserved_qty"],
-                    },
+                    payload=payload,
                 )
+                reserved_items.append(payload)
 
             if event_id:
                 mark_processed(event_id, CONSUMER_RESERVE)
 
-        return {"status": "reserved", "order_id": order_id, "items": reserved_items}
+        return {
+            "status": "reserved",
+            "order_id": order_id,
+            "items": reserved_items,
+            "fully_fulfilled": result.fully_fulfilled,
+            "splits": result.split_count,
+            "backordered": result.total_backordered,
+        }
 
     except Exception as exc:
         logger.exception("reserve_stock failed for order %s", order_id)

@@ -164,3 +164,9 @@ CELERY_TIMEZONE = "UTC"
 KAFKA_BOOTSTRAP_SERVERS = os.environ.get("KAFKA_BOOTSTRAP_SERVERS", "localhost:19092")
 KAFKA_TOPIC_ORDER_EVENTS = "order.events"
 KAFKA_TOPIC_INVENTORY_EVENTS = "inventory.events"
+
+# ---------------------------------------------------------------------------
+# Rate Limiting (Token Bucket)
+# ---------------------------------------------------------------------------
+RATE_LIMIT_CAPACITY = int(os.environ.get("RATE_LIMIT_CAPACITY", "10"))
+RATE_LIMIT_REFILL_RATE = float(os.environ.get("RATE_LIMIT_REFILL_RATE", "2.0"))

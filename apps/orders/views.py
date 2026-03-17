@@ -5,6 +5,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 
 from apps.common.outbox import publish_outbox_event
+from apps.common.throttles import TokenBucketThrottle
 from apps.orders.models import InvalidStatusTransition, Order, OrderLine, OrderStatus
 from apps.orders.serializers import (
     OrderCreateSerializer,
@@ -53,7 +54,12 @@ class OrderViewSet(viewsets.ModelViewSet):
         return Response(output.data, status=status.HTTP_201_CREATED)
 
     @extend_schema(request=None, responses=OrderSerializer)
-    @action(detail=True, methods=["post"], url_path="place")
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="place",
+        throttle_classes=[TokenBucketThrottle],
+    )
     def place(self, request, pk=None):
         """Transition order DRAFT -> PLACED. Emits OrderPlaced outbox event."""
         with transaction.atomic():
