@@ -13,3 +13,18 @@ class TimeStampedModel(models.Model):
     class Meta:
         abstract = True
         ordering = ["-created_at"]
+
+
+class IdempotencyKey(models.Model):
+    """Stores idempotency keys to prevent duplicate POST processing."""
+
+    key = models.CharField(max_length=255, unique=True, db_index=True)
+    response_status = models.PositiveSmallIntegerField()
+    response_body = models.JSONField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "idempotency_keys"
+
+    def __str__(self) -> str:
+        return self.key
